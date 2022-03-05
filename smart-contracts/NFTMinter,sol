@@ -1,0 +1,164 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8;
+
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+
+contract NFTMinter is ERC721, Ownable {
+    uint256 public mintPriceWL;
+    uint256 public mintPricePS;
+    uint256 public totalSupply;
+    uint256 public maxSupply;
+    uint256 public maxPerWalletWL;
+    uint256 public maxMintAmountPS;
+    uint256 internal mintPrice;
+    uint256 internal incrementWL;
+    bool public isMintPaused;
+    bool public onlyWhitelisted;
+    bool public revealed;
+    string public baseURI;
+    string public notRevealedURI;
+    string public baseExtension;
+    string internal baseTokenUri;
+    address payable public withdrawWallet;
+    address[] public whitelistedAddresses;
+    mapping(address => uint256) internal addressMintedBalanceWL;
+
+    constructor(
+        string memory _name,
+        string memory _symbol,
+        string memory _initBaseURI,
+        string memory _initNotRevealedURI
+    ) payable ERC721(_name, _symbol) {
+        setBaseURI(_initBaseURI);
+        setNotRevealedURI(_initNotRevealedURI);
+        baseExtension = ".json";
+        mintPriceWL = 8 ether;
+        mintPricePS = 12 ether;
+        totalSupply = 0;
+        maxSupply = 3500;
+        maxPerWalletWL = 3;
+        maxMintAmountPS = 10;
+        onlyWhitelisted = true;
+        revealed = false;
+        isMintPaused = true;
+    }
+
+    // Internal Functions
+
+    function _baseURI() internal view virtual override returns (string memory) {
+        return baseURI;
+    }
+
+    // Public Functions
+
+    function setBaseURI(string memory _newBaseURI) public onlyOwner {
+        baseURI = _newBaseURI;
+    }
+
+     function setNotRevealedURI(string memory _notRevealedURI) public onlyOwner {
+        notRevealedURI = _notRevealedURI;
+    }
+
+    // Only Owner Functions
+
+    function reveal() external onlyOwner {
+        revealed = true;
+    }
+
+    function setBaseExtension(string memory _baseExtension) external onlyOwner {
+        baseExtension = _baseExtension;
+    }
+    
+    function setisMintPaused(bool _isMintPaused) external onlyOwner {
+        isMintPaused = _isMintPaused;
+    }
+
+    function setMaxPerWalletWL(uint256 _maxPerWalletWL) external onlyOwner {
+        maxPerWalletWL = _maxPerWalletWL;
+    }
+
+    function setMaxMintAmountPS(uint256 _maxMintAmountPS) external onlyOwner {
+        maxMintAmountPS = _maxMintAmountPS;
+    }
+
+    function setMintPricePS(uint256 _mintPricePS) external onlyOwner {
+        mintPricePS = _mintPricePS;
+    }
+
+    function setMintPriceWL(uint256 _mintPriceWL) external onlyOwner {
+        mintPriceWL = _mintPriceWL;
+    }
+
+    function setMaxSupply(uint256 _maxSupply) external onlyOwner {
+        maxSupply = _maxSupply;
+    }
+
+    function setOnlyWhitelisted(bool _onlyWhitelisted) external onlyOwner {
+        onlyWhitelisted = _onlyWhitelisted;
+    }
+
+    function setBaseTokenUri(string calldata _baseTokenUri) external onlyOwner {
+        baseTokenUri = _baseTokenUri;
+    }
+
+    function whitelistUsers(address[] calldata _users) external onlyOwner {
+        delete whitelistedAddresses;
+        whitelistedAddresses = _users;
+    }
+
+    function withdraw() external payable onlyOwner {
+        (bool success, ) = payable(owner()).call{value: address(this).balance}("");
+        require(success, "Withdraw Failed");
+    }
+
+     // Public Functions
+
+    function tokenURI(uint256 _tokenId) public view virtual override returns (string memory) {
+        require(_exists(_tokenId), "Token Does Not Exist!");
+        if(revealed == false) {
+            return notRevealedURI;
+        }
+        string memory currentBaseURI = _baseURI();
+        return bytes(currentBaseURI).length > 0
+            ? string(abi.encodePacked(currentBaseURI, Strings.toString(_tokenId), baseExtension))
+            : "";
+    }
+
+    function isWhitelisted(address _user) public view returns (bool) {
+        for(uint i = 0; i < whitelistedAddresses.length; i++) {
+            if(whitelistedAddresses[i] == _user) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function mint(uint256 _quantity) public payable {
+        require(!isMintPaused, "Minting Is Currently Paused");
+        require(totalSupply + _quantity <= maxSupply, "Sold Out");
+        require(_quantity > 0, "Mint At Least 1 NFT");
+
+        if (msg.sender != owner()) {
+            if(onlyWhitelisted == true) {
+                require(isWhitelisted(msg.sender), "User Is Not Whitelisted");
+                uint256 ownerMintedCount = addressMintedBalanceWL[msg.sender];
+                require(ownerMintedCount + _quantity <= maxPerWalletWL, "Max Whitelist Mint Per Address Exceeded");
+                mintPrice = mintPriceWL;
+                incrementWL = 1;
+            } else {
+                mintPrice = mintPricePS;
+                incrementWL = 0;
+            }
+            require(msg.value == _quantity * mintPrice, "Insufficient Funds");
+            require(_quantity <= maxMintAmountPS, "Exceed Max Allowed Per Mint");
+        }
+        for (uint256 i = 0; i < _quantity; i++) {
+            uint256 newTokenId = totalSupply + 1;
+            addressMintedBalanceWL[msg.sender] = addressMintedBalanceWL[msg.sender] + incrementWL;
+            totalSupply++;
+            _safeMint(msg.sender, newTokenId);
+        }
+    }
+}
